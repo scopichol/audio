@@ -1,0 +1,8 @@
+.env
+out/
+sentences/
+*.png
+*.wav
+*.tsv
+*.txt
+*.csv
