@@ -43,38 +43,27 @@ def process_sentence(audio_path, words_timestamps):
         })
     return results
 
-def get_words_timestamps(audio_path, transcript_path):
+def get_words_timestamps(audio_path):
     """
-    Використовує aeneas для автоматичного визначення часових меж слів.
-    transcript_path — текстовий файл з реченням (одне речення).
+    Використовує whisper-timestamped для автоматичного визначення часових меж слів.
     Повертає: [(word, (start_ms, end_ms)), ...]
     """
-    from aeneas.executetask import ExecuteTask
-    from aeneas.task import Task
-    import xml.etree.ElementTree as ET
+    from whisper_timestamped import load_model, transcribe
 
-    config_string = u"task_language=uk|is_text_type=plain|os_task_file_format=xml"
-    task = Task(config_string=config_string)
-    task.audio_file_path_absolute = audio_path
-    task.text_file_path_absolute = transcript_path
-    task.output_file_path_absolute = "temp_syncmap.xml"
+    model = load_model("small")  # або "base", "medium", "large"
+    result = transcribe(model, audio_path, language="uk")
 
-    ExecuteTask(task).execute()
-    task.output_sync_map_file()
-
-    tree = ET.parse("temp_syncmap.xml")
-    root = tree.getroot()
-    results = []
-    for fragment in root.findall(".//fragment"):
-        word = fragment.attrib["lines"].strip()
-        start = float(fragment.attrib["begin"]) * 1000
-        end = float(fragment.attrib["end"]) * 1000
-        results.append((word, (int(start), int(end))))
-    return results
+    words = []
+    for segment in result["segments"]:
+        for word_info in segment["words"]:
+            word = word_info["text"].strip()
+            start = int(word_info["start"] * 1000)
+            end = int(word_info["end"] * 1000)
+            words.append((word, (start, end)))
+    return words
 
 # Example usage:
-# transcript.txt має одне речення, кожне слово на окремому рядку або через пробіл.
-words_timestamps = get_words_timestamps("sentences/sentence_1.wav", "sentences/sentence_1.txt")
+words_timestamps = get_words_timestamps("sentences/sentence_1.wav")
 results = process_sentence("sentences/sentence_1.wav", words_timestamps)
 for r in results:
     print(f"{r['word']}: наголос на {r['stress_time']} мс, тон {r['pitch']}")
