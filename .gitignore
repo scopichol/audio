@@ -6,3 +6,4 @@ sentences/
 *.tsv
 *.txt
 *.csv
+*.pyc
