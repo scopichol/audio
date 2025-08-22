@@ -51,7 +51,7 @@ def get_words_timestamps(audio_path):
     from whisper_timestamped import load_model, transcribe
 
     model = load_model("small")  # або "base", "medium", "large"
-    result = transcribe(model, audio_path, language="uk")
+    result = transcribe(model, audio_path, language="en")
 
     words = []
     for segment in result["segments"]:
@@ -65,5 +65,6 @@ def get_words_timestamps(audio_path):
 # Example usage:
 words_timestamps = get_words_timestamps("sentences/sentence_1.wav")
 results = process_sentence("sentences/sentence_1.wav", words_timestamps)
-for r in results:
-    print(f"{r['word']}: наголос на {r['stress_time']} мс, тон {r['pitch']}")
+
+for r,(w,(start,stop)) in zip(results,words_timestamps):
+    print(f"{r['word']}: початок {start} мс, кінець {stop} мс, наголос на {r['stress_time']} мс, тон {r['pitch']} - {w}")
