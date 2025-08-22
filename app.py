@@ -1,6 +1,9 @@
 import parselmouth
 from pydub import AudioSegment
 import numpy as np
+from write_audio import record_audio
+import sounddevice as sd
+import soundfile as sf
 
 def analyze_pitch(audio_path):
     snd = parselmouth.Sound(audio_path)
@@ -62,9 +65,32 @@ def get_words_timestamps(audio_path):
             words.append((word, (start, end)))
     return words
 
-# Example usage:
-words_timestamps = get_words_timestamps("sentences/sentence_1.wav")
-results = process_sentence("sentences/sentence_1.wav", words_timestamps)
+def play_audio(filepath):
+    data, fs = sf.read(filepath, dtype='int16')
+    sd.play(data, fs)
+    sd.wait()
 
-for r,(w,(start,stop)) in zip(results,words_timestamps):
-    print(f"{r['word']}: початок {start} мс, кінець {stop} мс, наголос на {r['stress_time']} мс, тон {r['pitch']} - {w}")
+# Example usage:
+sample_file = "sentences/sentence_1.wav"
+audio_file = "output.wav"  # записаний файл з write_audio.py
+
+# Розпізнавання зразку
+print("Розпізнавання зразку:")
+sample_words_timestamps = get_words_timestamps(sample_file)
+sample_results = process_sentence(sample_file, sample_words_timestamps)
+for r, (w, (start, stop)) in zip(sample_results, sample_words_timestamps):
+    print(f"{r['word']}: наголос на {r['stress_time']} мс, тон {r['pitch']}")
+
+# Відтворення зразку перед записом
+print("Відтворення зразку...")
+play_audio(sample_file)
+
+# Додаємо запис аудіо перед розпізнаванням
+record_audio(audio_file, duration=5)  # записати 5 секунд
+
+words_timestamps = get_words_timestamps(audio_file)
+results = process_sentence(audio_file, words_timestamps)
+
+for r, (w, (start, stop)) in zip(results, words_timestamps):
+    # print(f"{r['word']}: початок {start} мс, кінець {stop} мс, наголос на {r['stress_time']} мс, тон {r['pitch']} - {w}")
+    print(f"{r['word']}: наголос на {r['stress_time']} мс, тон {r['pitch']}")
