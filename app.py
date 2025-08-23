@@ -77,6 +77,19 @@ def play_beep(duration=0.3, freq=1000, fs=44100):
     sd.play(beep, fs)
     sd.wait()
 
+def read_reference_text(audio_path):
+    """
+    Читає референсний текст для аудіо-файлу.
+    Шукає файл з таким же ім'ям, але з розширенням .txt.
+    """
+    import os
+    txt_path = os.path.splitext(audio_path)[0] + ".txt"
+    try:
+        with open(txt_path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
 # Example usage:
 sample_file = "sentences/sentence_1.wav"
 audio_file = "output9.wav"  # записаний файл з write_audio.py
@@ -105,7 +118,7 @@ for r, (w, (start, stop)) in zip(results, words_timestamps):
     # print(f"{r['word']}: початок {start} мс, кінець {stop} мс, наголос на {r['stress_time']} мс, тон {r['pitch']} - {w}")
     print(f"{r['word']}: наголос на {r['stress_time']} мс, тон {r['pitch']}")
 
-ref = "The birch canoe slid on the smooth planks."
+ref = read_reference_text(sample_file)
 hypRef = ' '.join([r['word'] for r in sample_results])
 hypUser = ' '.join([r['word'] for r in results])
 print(f"\nREF: {ref}")
