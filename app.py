@@ -108,24 +108,31 @@ play_audio(sample_file)
 # Відтворення сигналу перед записом
 play_beep()
 
-# Додаємо запис аудіо перед розпізнаванням
-record_audio(audio_file, duration=15)  # записати 5 секунд
+# Повтор запису аудіо поки WER не менше 30%
+wer_threshold = 0.3
+attempt = 1
+while True:
+    print(f"\nСпроба запису #{attempt}")
+    record_audio(audio_file, duration=15)
+    words_timestamps = get_words_timestamps(audio_file)
+    results = process_sentence(audio_file, words_timestamps)
 
-words_timestamps = get_words_timestamps(audio_file)
-results = process_sentence(audio_file, words_timestamps)
+    for r, (w, (start, stop)) in zip(results, words_timestamps):
+        print(f"{r['word']}: наголос на {r['stress_time']} мс, тон {r['pitch']}")
 
-for r, (w, (start, stop)) in zip(results, words_timestamps):
-    # print(f"{r['word']}: початок {start} мс, кінець {stop} мс, наголос на {r['stress_time']} мс, тон {r['pitch']} - {w}")
-    print(f"{r['word']}: наголос на {r['stress_time']} мс, тон {r['pitch']}")
+    ref = read_reference_text(sample_file)
+    hypUser = ' '.join([r['word'] for r in results])
+    wer = jiwer.wer(ref, hypUser)
+    print(f"\nREF: {ref}")
+    print(f"HYP (User): {hypUser}")
+    print(f"\nHyp (User) WER: {wer*100:.2f}%, CER: {jiwer.cer(ref,hypUser)*100:.2f}%")
 
-ref = read_reference_text(sample_file)
-hypRef = ' '.join([r['word'] for r in sample_results])
-hypUser = ' '.join([r['word'] for r in results])
-print(f"\nREF: {ref}")
-print(f"HYP (Ref): {hypRef}")
-print(f"HYP (User): {hypUser}")
+    play_audio(audio_file)
 
-print(f"\nHyp(ref)  WER: {jiwer.wer(ref,hypRef)*100:.2f}%, CER: {jiwer.cer(ref,hypRef)*100:.2f}%")
-print(f"Hyp (User) WER: {jiwer.wer(ref,hypUser)*100:.2f}%, CER: {jiwer.cer(ref,hypUser)*100:.2f}%")
-
-play_audio(audio_file)
+    if wer < wer_threshold:
+        print(f"\nWER < {wer_threshold*100:.0f}%. Запис прийнято.")
+        break
+    else:
+        print(f"\nWER >= {wer_threshold*100:.0f}%. Повторіть запис.")
+        play_beep()
+        attempt += 1
