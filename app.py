@@ -92,7 +92,7 @@ def read_reference_text(audio_path):
 
 # Example usage:
 sample_file = "sentences/sentence_1.wav"
-audio_file = "output01.wav"  # записаний файл з write_audio.py
+audio_file = "output02.wav"  # записаний файл з write_audio.py
 
 # Розпізнавання зразку
 print("Розпізнавання зразку:")
@@ -104,9 +104,11 @@ for r, (w, (start, stop)) in zip(sample_results, sample_words_timestamps):
 # Повтор запису аудіо поки WER не менше 30%
 wer_threshold = 0.3
 attempt = 1
+ref = read_reference_text(sample_file)
 while True:
     print(f"\nСпроба запису #{attempt}")
-    # Озвучення зразка перед кожним записом
+    # Виведення reference тексту перед озвучкою зразка
+    print(f"Reference: {ref}")
     print("Відтворення зразку...")
     play_audio(sample_file)
     play_beep()
