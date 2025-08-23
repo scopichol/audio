@@ -4,6 +4,7 @@ import numpy as np
 from write_audio import record_audio
 import sounddevice as sd
 import soundfile as sf
+import jiwer 
 
 def analyze_pitch(audio_path):
     snd = parselmouth.Sound(audio_path)
@@ -70,9 +71,15 @@ def play_audio(filepath):
     sd.play(data, fs)
     sd.wait()
 
+def play_beep(duration=0.3, freq=1000, fs=44100):
+    t = np.linspace(0, duration, int(fs * duration), False)
+    beep = (np.sin(2 * np.pi * freq * t) * 32767).astype(np.int16)
+    sd.play(beep, fs)
+    sd.wait()
+
 # Example usage:
 sample_file = "sentences/sentence_1.wav"
-audio_file = "output.wav"  # записаний файл з write_audio.py
+audio_file = "output9.wav"  # записаний файл з write_audio.py
 
 # Розпізнавання зразку
 print("Розпізнавання зразку:")
@@ -85,8 +92,11 @@ for r, (w, (start, stop)) in zip(sample_results, sample_words_timestamps):
 print("Відтворення зразку...")
 play_audio(sample_file)
 
+# Відтворення сигналу перед записом
+play_beep()
+
 # Додаємо запис аудіо перед розпізнаванням
-record_audio(audio_file, duration=5)  # записати 5 секунд
+record_audio(audio_file, duration=15)  # записати 5 секунд
 
 words_timestamps = get_words_timestamps(audio_file)
 results = process_sentence(audio_file, words_timestamps)
@@ -94,3 +104,15 @@ results = process_sentence(audio_file, words_timestamps)
 for r, (w, (start, stop)) in zip(results, words_timestamps):
     # print(f"{r['word']}: початок {start} мс, кінець {stop} мс, наголос на {r['stress_time']} мс, тон {r['pitch']} - {w}")
     print(f"{r['word']}: наголос на {r['stress_time']} мс, тон {r['pitch']}")
+
+ref = "The birch canoe slid on the smooth planks."
+hypRef = ' '.join([r['word'] for r in sample_results])
+hypUser = ' '.join([r['word'] for r in results])
+print(f"\nREF: {ref}")
+print(f"HYP (Ref): {hypRef}")
+print(f"HYP (User): {hypUser}")
+
+print(f"\nHyp(ref)  WER: {jiwer.wer(ref,hypRef)*100:.2f}%, CER: {jiwer.cer(ref,hypRef)*100:.2f}%")
+print(f"Hyp (User) WER: {jiwer.wer(ref,hypUser)*100:.2f}%, CER: {jiwer.cer(ref,hypUser)*100:.2f}%")
+
+play_audio(audio_file)
