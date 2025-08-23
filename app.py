@@ -92,7 +92,7 @@ def read_reference_text(audio_path):
 
 # Example usage:
 sample_file = "sentences/sentence_1.wav"
-audio_file = "output9.wav"  # записаний файл з write_audio.py
+audio_file = "output01.wav"  # записаний файл з write_audio.py
 
 # Розпізнавання зразку
 print("Розпізнавання зразку:")
@@ -101,18 +101,15 @@ sample_results = process_sentence(sample_file, sample_words_timestamps)
 for r, (w, (start, stop)) in zip(sample_results, sample_words_timestamps):
     print(f"{r['word']}: наголос на {r['stress_time']} мс, тон {r['pitch']}")
 
-# Відтворення зразку перед записом
-print("Відтворення зразку...")
-play_audio(sample_file)
-
-# Відтворення сигналу перед записом
-play_beep()
-
 # Повтор запису аудіо поки WER не менше 30%
 wer_threshold = 0.3
 attempt = 1
 while True:
     print(f"\nСпроба запису #{attempt}")
+    # Озвучення зразка перед кожним записом
+    print("Відтворення зразку...")
+    play_audio(sample_file)
+    play_beep()
     record_audio(audio_file, duration=15)
     words_timestamps = get_words_timestamps(audio_file)
     results = process_sentence(audio_file, words_timestamps)
@@ -134,5 +131,4 @@ while True:
         break
     else:
         print(f"\nWER >= {wer_threshold*100:.0f}%. Повторіть запис.")
-        play_beep()
         attempt += 1
