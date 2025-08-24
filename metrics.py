@@ -1,6 +1,10 @@
 import re
 import unicodedata
 import jiwer 
+import difflib
+import glob
+import os
+import csv
 
 def normalize(text: str) -> str:
     # юнікод-нормалізація, нижній регістр
@@ -63,6 +67,14 @@ def ser(ref_sentences, hyp_sentences) -> float:
         if S+D+I > 0: bad += 1
     return bad / max(1, len(ref_sentences))
 
+def seq_match_ratio(ref: str, hyp: str) -> float:
+    """
+    Повертає коефіцієнт схожості (0..1) між референсом і гіпотезою за difflib.SequenceMatcher.
+    """
+    rn = normalize(ref)
+    hn = normalize(hyp)
+    return difflib.SequenceMatcher(None, rn, hn).ratio()
+
 if __name__ == "__main__":
     r = "The birch canoe slid on the smooth planks."
     h = "The badge, the noise, slipped on the small supplanks."
@@ -78,3 +90,45 @@ if __name__ == "__main__":
     print("WIL:", jiwer.wil(rn,hn))
     print("MER:", jiwer.mer(rn,hn))
     print("WIP:", jiwer.wip(rn,hn))
+    print("SequenceMatcher ratio:", seq_match_ratio(r, h))
+    # Порівняння для всіх output*.txt з каталогу out
+    ref_path = "sentences/sentence_1.txt"
+    try:
+        with open(ref_path, "r", encoding="utf-8") as f:
+            ref_text = f.read().strip()
+    except Exception:
+        ref_text = ""
+    metrics_rows = []
+    for hyp_file in sorted(glob.glob("out/output*.txt")):
+        with open(hyp_file, "r", encoding="utf-8") as f:
+            hyp_text = f.read().strip()
+        wer_val = wer(ref_text, hyp_text)
+        cer_val = cer(ref_text, hyp_text)
+        seq_ratio = seq_match_ratio(ref_text, hyp_text)
+        jiwer_wer = jiwer.wer(normalize(ref_text), normalize(hyp_text))
+        jiwer_cer = jiwer.cer(normalize(ref_text), normalize(hyp_text))
+        wil = jiwer.wil(normalize(ref_text), normalize(hyp_text))
+        mer = jiwer.mer(normalize(ref_text), normalize(hyp_text))
+        wip = jiwer.wip(normalize(ref_text), normalize(hyp_text))
+        print(f"\n{os.path.basename(hyp_file)}")
+        print(f"WER: {wer_val*100:.2f}%, CER: {cer_val*100:.2f}%")
+        print(f"SequenceMatcher ratio: {seq_ratio:.4f}")
+        print(f"jiwer WER: {jiwer_wer*100:.2f}%")
+        print(f"jiwer CER: {jiwer_cer*100:.2f}%")
+        print("WIL:", wil)
+        print("MER:", mer)
+        print("WIP:", wip)
+        metrics_rows.append([
+            os.path.basename(hyp_file),
+            wer_val, cer_val, seq_ratio,
+            jiwer_wer, jiwer_cer, wil, mer, wip,
+            hyp_text  # додаємо текст гіпотези
+        ])
+    # Запис у CSV
+    with open("out/metrics.csv", "w", newline='', encoding="utf-8") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow([
+            "file", "wer", "cer", "seq_match_ratio",
+            "jiwer_wer", "jiwer_cer", "wil", "mer", "wip", "text"
+        ])
+        writer.writerows(metrics_rows)
