@@ -594,7 +594,7 @@ def print_phoneme_alignment(ref_phones, hyp_phones):
         "deletions": deletions
     }
 
-def plot_phoneme_comparison(ref_phones, hyp_phones, out_png="phoneme_comparison.png", prefix=""):
+def plot_phoneme_comparison(ref_phones, hyp_phones, out_png="phoneme_comparison.png", prefix="", ref_text="", hyp_text=""):
     """
     Створює графічну візуалізацію порівняння фонем у форматі IPA та зберігає в каталог out.
     """
@@ -632,28 +632,40 @@ def plot_phoneme_comparison(ref_phones, hyp_phones, out_png="phoneme_comparison.
         else:  # delete
             colors.append("orange")
 
-    # Створення графіку
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(max(15, len(comparison)*0.6), 10))
+    # Створення графіку з більшою висотою для тексту
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(max(15, len(comparison)*0.6), 12))
     
     # Верхній графік - REF фонеми
     bars1 = ax1.bar(positions, [1]*len(positions), color=colors, alpha=0.7, edgecolor='black')
     ax1.set_title("Еталонні фонеми (REF) - IPA Format", fontsize=14, fontweight='bold')
-    ax1.set_ylim(0, 1.5)
+    ax1.set_ylim(0, 2.0)  # Збільшуємо висоту для тексту
     ax1.set_ylabel("REF")
+    
+    # Додаємо референсний текст над графіком
+    if ref_text:
+        ax1.text(len(positions)/2, 1.8, f"Референсний текст: {ref_text}", 
+                ha='center', va='center', fontsize=16, fontweight='bold', 
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.7))
     
     # Додаємо підписи REF фонем у IPA
     for i, (pos, label) in enumerate(zip(positions, ref_labels)):
         if label:
             ax1.text(pos, 0.5, label, ha='center', va='center', fontweight='bold', fontsize=16)
         # Додаємо номер позиції
-        ax1.text(pos, 1.2, str(i), ha='center', va='center', fontsize=8, alpha=0.7)
+        ax1.text(pos, 1.4, str(i), ha='center', va='center', fontsize=8, alpha=0.7)
     
     # Нижній графік - HYP фонеми  
     bars2 = ax2.bar(positions, [1]*len(positions), color=colors, alpha=0.7, edgecolor='black')
     ax2.set_title("Розпізнані фонеми (HYP) - IPA Format", fontsize=14, fontweight='bold')
-    ax2.set_ylim(0, 1.5)
+    ax2.set_ylim(0, 2.0)  # Збільшуємо висоту для тексту
     ax2.set_ylabel("HYP")
     ax2.set_xlabel("Позиція")
+    
+    # Додаємо гіпотезний текст над графіком
+    if hyp_text:
+        ax2.text(len(positions)/2, 1.8, f"Розпізнаний текст: {hyp_text}", 
+                ha='center', va='center', fontsize=16, fontweight='bold',
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgreen", alpha=0.7))
     
     # Додаємо підписи HYP фонем у IPA
     for i, (pos, label) in enumerate(zip(positions, hyp_labels)):
@@ -805,7 +817,8 @@ def main():
     # Детальне порівняння фонем з IPA відображенням
     comparison_results = print_phoneme_alignment(ref_phones, hyp_phones)
     analyze_error_patterns(ref_phones, hyp_phones)
-    plot_phoneme_comparison(ref_phones, hyp_phones, "phoneme_comparison.png", prefix=REFERENCE_NAME)
+    plot_phoneme_comparison(ref_phones, hyp_phones, "phoneme_comparison.png", prefix=REFERENCE_NAME, 
+                          ref_text=target_text, hyp_text=asr_text)
 
     # Матриця плутанин
     save_confusion_matrix(ref_phones, hyp_phones, out_png="phones_confusion.png", include_eps=False, prefix=REFERENCE_NAME)
