@@ -248,6 +248,128 @@ def compute_per(ref, hyp):
     ed = lev.distance(" ".join(ref), " ".join(hyp))
     return ed / max(1, len(ref))
 
+def compute_wer(ref_text, hyp_text):
+    """
+    Обчислює Word Error Rate (WER) між референсним та розпізнаним текстом.
+    WER = (S + D + I) / N
+    де S = кількість замін, D = кількість видалень, I = кількість вставок, N = кількість слів у reference
+    """
+    # Нормалізуємо тексти - приводимо до нижнього регістру та прибираємо пунктуацію
+    ref_words = re.findall(r'\b\w+\b', ref_text.lower())
+    hyp_words = re.findall(r'\b\w+\b', hyp_text.lower())
+    
+    if not ref_words:
+        return 1.0 if hyp_words else 0.0
+    
+    # Використовуємо Levenshtein distance для слів
+    ed = lev.distance(ref_words, hyp_words)
+    wer = ed / len(ref_words)
+    
+    return wer
+
+def detailed_word_comparison(ref_text, hyp_text):
+    """
+    Детальне порівняння слів з виділенням помилок.
+    Повертає список операцій та статистику для WER.
+    """
+    # Нормалізуємо тексти
+    ref_words = re.findall(r'\b\w+\b', ref_text.lower())
+    hyp_words = re.findall(r'\b\w+\b', hyp_text.lower())
+    
+    if not ref_words and not hyp_words:
+        return [], {"wer": 0.0, "correct": 0, "substitutions": 0, "insertions": 0, "deletions": 0}
+    
+    if not ref_words:
+        return [], {"wer": 1.0, "correct": 0, "substitutions": 0, "insertions": len(hyp_words), "deletions": 0}
+    
+    # Отримуємо операції Levenshtein для слів
+    ops = levenshtein_ops(ref_words, hyp_words)
+    
+    # Підраховуємо статистику
+    correct = sum(1 for op, _, _ in ops if op == "match")
+    substitutions = sum(1 for op, _, _ in ops if op == "replace")
+    insertions = sum(1 for op, _, _ in ops if op == "insert")
+    deletions = sum(1 for op, _, _ in ops if op == "delete")
+    
+    wer = (substitutions + insertions + deletions) / len(ref_words)
+    
+    return ops, {
+        "wer": wer,
+        "correct": correct,
+        "substitutions": substitutions,
+        "insertions": insertions,
+        "deletions": deletions
+    }
+
+def print_word_alignment(ref_text, hyp_text):
+    """
+    Друкує вирівняне порівняння слів з виділенням помилок для WER.
+    """
+    ops, stats = detailed_word_comparison(ref_text, hyp_text)
+    
+    print("\n" + "="*80)
+    print("ДЕТАЛЬНЕ ПОРІВНЯННЯ СЛІВ (WER)")
+    print("="*80)
+    
+    print(f"Статистика: {stats['correct']} збігів, {stats['substitutions']} замін, {stats['insertions']} вставок, {stats['deletions']} видалень")
+    print(f"WER (Word Error Rate): {stats['wer']:.3f} ({stats['wer']*100:.1f}%)")
+    print(f"Точність слів: {(1-stats['wer'])*100:.1f}%")
+    print("-"*80)
+    
+    if not ops:
+        print("Немає даних для порівняння")
+        return stats
+    
+    # Виводимо вирівняння слів
+    ref_line = "REF: "
+    hyp_line = "HYP: "
+    ops_line = "OPS: "
+    
+    for op, ref_word, hyp_word in ops:
+        # Визначаємо ширину колонки
+        max_len = max(len(ref_word) if ref_word != "<eps>" else 3, 
+                     len(hyp_word) if hyp_word != "<eps>" else 3, 4)
+        
+        # Форматуємо слова
+        ref_str = ref_word.center(max_len) if ref_word != "<eps>" else "---".center(max_len)
+        hyp_str = hyp_word.center(max_len) if hyp_word != "<eps>" else "---".center(max_len)
+        
+        # Символ операції
+        op_symbol = {
+            "match": "✓",
+            "replace": "✗", 
+            "insert": "+",
+            "delete": "-"
+        }[op]
+        
+        ops_str = op_symbol.center(max_len)
+        
+        ref_line += ref_str + " "
+        hyp_line += hyp_str + " "
+        ops_line += ops_str + " "
+    
+    print(ref_line)
+    print(hyp_line) 
+    print(ops_line)
+    print("-"*80)
+    
+    # Виводимо детальний список помилок
+    errors = [(op, ref_word, hyp_word) for op, ref_word, hyp_word in ops if op != "match"]
+    if errors:
+        print("ПОМИЛКИ У СЛОВАХ:")
+        print("-"*40)
+        for i, (op, ref_word, hyp_word) in enumerate(errors, 1):
+            if op == "replace":
+                print(f"{i}. '{ref_word}' → '{hyp_word}' (заміна)")
+            elif op == "insert":
+                print(f"{i}. вставлено '{hyp_word}'")
+            elif op == "delete":
+                print(f"{i}. пропущено '{ref_word}'")
+    else:
+        print("🎉 Помилок у словах не знайдено! Ідеальне розпізнавання!")
+    
+    return stats
+
 def save_confusion_matrix(ref, hyp, out_png="phones_confusion.png", include_eps=False, prefix=""):
     """
     Будуємо матрицю лише для замін (replace) і збігів (match).
@@ -353,9 +475,6 @@ def detailed_phoneme_comparison(ref_phones, hyp_phones):
     Референсний текст є основою для вирівнювання.
     Тепер обидва списки мають паузи між словами.
     """
-    print("detailed ref_phones",ref_phones)
-    print("detailed hyp_phones",hyp_phones)
-
     ops = levenshtein_ops(ref_phones, hyp_phones)
     comparison_results = []
     
@@ -480,8 +599,6 @@ def plot_phoneme_comparison(ref_phones, hyp_phones, out_png="phoneme_comparison.
     Створює графічну візуалізацію порівняння фонем у форматі IPA та зберігає в каталог out.
     """
 
-    print("plot ref_phones",ref_phones)
-    print("plot hyp_phones",hyp_phones)
     from utilites import get_output_path, arpabet_token_to_ipa
     
     if prefix:
@@ -514,9 +631,6 @@ def plot_phoneme_comparison(ref_phones, hyp_phones, out_png="phoneme_comparison.
             colors.append("lightblue")
         else:  # delete
             colors.append("orange")
-    
-    print("ref_labels",ref_labels)
-    print("hyp_labels",hyp_labels)
 
     # Створення графіку
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(max(15, len(comparison)*0.6), 10))
@@ -533,10 +647,6 @@ def plot_phoneme_comparison(ref_phones, hyp_phones, out_png="phoneme_comparison.
             ax1.text(pos, 0.5, label, ha='center', va='center', fontweight='bold', fontsize=16)
         # Додаємо номер позиції
         ax1.text(pos, 1.2, str(i), ha='center', va='center', fontsize=8, alpha=0.7)
-    
-    # Додаємо текст "reference" над фонемами
-    ax1.text(len(positions)/2, 1.35, "reference", ha='center', va='center', 
-             fontsize=12, fontweight='bold', alpha=0.8, style='italic')
     
     # Нижній графік - HYP фонеми  
     bars2 = ax2.bar(positions, [1]*len(positions), color=colors, alpha=0.7, edgecolor='black')
@@ -685,6 +795,13 @@ def main():
     per = compute_per(ref_phones, hyp_phones)
     print(f"\n📊 PER (Phone Error Rate) = {per:.3f} (0.0 = ідеально)")
 
+    # 5) WER (Word Error Rate) + детальний аналіз слів
+    wer = compute_wer(target_text, asr_text)
+    print(f"📊 WER (Word Error Rate) = {wer:.3f} (0.0 = ідеально)")
+    
+    # Детальне порівняння слів
+    word_comparison_results = print_word_alignment(target_text, asr_text)
+
     # Детальне порівняння фонем з IPA відображенням
     comparison_results = print_phoneme_alignment(ref_phones, hyp_phones)
     analyze_error_patterns(ref_phones, hyp_phones)
@@ -693,7 +810,7 @@ def main():
     # Матриця плутанин
     save_confusion_matrix(ref_phones, hyp_phones, out_png="phones_confusion.png", include_eps=False, prefix=REFERENCE_NAME)
 
-    # 5) Збережемо результати у JSON
+    # 6) Збережемо результати у JSON
     json_path = get_output_path(f"{REFERENCE_NAME}_phones_ref_hyp.json")
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump({
@@ -705,11 +822,19 @@ def main():
             "hyp_phones_arpabet": hyp_phones,
             "hyp_phones_ipa": hyp_ipa,
             "per": per,
-            "accuracy": comparison_results["accuracy"],
-            "errors": {
+            "wer": wer,
+            "phoneme_accuracy": comparison_results["accuracy"],
+            "word_accuracy": (1 - word_comparison_results["wer"]) * 100,
+            "phoneme_errors": {
                 "substitutions": comparison_results["substitutions"],
                 "insertions": comparison_results["insertions"],
                 "deletions": comparison_results["deletions"]
+            },
+            "word_errors": {
+                "correct": word_comparison_results["correct"],
+                "substitutions": word_comparison_results["substitutions"],
+                "insertions": word_comparison_results["insertions"],
+                "deletions": word_comparison_results["deletions"]
             }
         }, f, ensure_ascii=False, indent=2)
     print(f"💾 Результати збережено у: {json_path}")
