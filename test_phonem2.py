@@ -130,9 +130,24 @@ def normalize_arpabet(seq):
     return cleaned
 
 def g2p_arpabet(text):
+    """Конвертує текст в ARPAbet фонеми з паузами між словами"""
     g2p = G2p()
-    raw = [p for p in g2p(text) if isinstance(p, str)]
-    return normalize_arpabet(raw)
+    words = text.split()
+    all_phonemes = []
+    
+    for i, word in enumerate(words):
+        # Прибираємо пунктуацію з слова
+        clean_word = re.sub(r'[^\w\']+', '', word.lower())
+        if clean_word:
+            raw = [p for p in g2p(clean_word) if isinstance(p, str)]
+            word_phonemes = normalize_arpabet(raw)
+            all_phonemes.extend(word_phonemes)
+            
+            # Додаємо паузу після кожного слова (крім останнього)
+            if i < len(words) - 1:
+                all_phonemes.append('SP')
+    
+    return all_phonemes
 
 def extract_hyp_arpabet_from_whisperx(aligned_segments):
     """
@@ -229,6 +244,7 @@ def levenshtein_ops(ref, hyp):
     return ops
 
 def compute_per(ref, hyp):
+    """Обчислює Phone Error Rate з урахуванням пауз"""
     ed = lev.distance(" ".join(ref), " ".join(hyp))
     return ed / max(1, len(ref))
 
@@ -236,6 +252,7 @@ def save_confusion_matrix(ref, hyp, out_png="phones_confusion.png", include_eps=
     """
     Будуємо матрицю лише для замін (replace) і збігів (match).
     Для insert/delete можна додати <eps>, якщо include_eps=True.
+    Тепер обидва списки мають паузи між словами.
     """
     ops = levenshtein_ops(ref, hyp)
     pairs = []
@@ -333,6 +350,8 @@ def detailed_phoneme_comparison(ref_phones, hyp_phones):
     """
     Детальне порівняння фонем з виділенням помилок.
     Повертає список операцій з позиціями та типами помилок.
+    Референсний текст є основою для вирівнювання.
+    Тепер обидва списки мають паузи між словами.
     """
     print("detailed ref_phones",ref_phones)
     print("detailed hyp_phones",hyp_phones)
