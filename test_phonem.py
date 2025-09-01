@@ -12,7 +12,7 @@ import nltk
 # nltk.download('averaged_perceptron_tagger')           # класична назва
 # nltk.download('averaged_perceptron_tagger_eng')       # новіша ресурсна назва
 
-from utilites import read_reference_text, arpabet_seq_to_ipa  # лишаю як є, припускаю що модуль у тебе існує
+from utilites import read_reference_text, arpabet_seq_to_ipa, display_pauses_with_symbols, analyze_pause_distribution  # додано нові функції
 
 # --- 0.1) Hugging Face: вимкнути симлінки, щоб не ловити WinError 1314 ---
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
@@ -31,15 +31,45 @@ os.environ.setdefault("HF_HUB_LOCAL_DIR_USE_SYMLINKS", "0")
 
 ref_file = "sentences/sentence_1.wav"
 target_text = read_reference_text(ref_file)
-sample_file = "output01.wav"  # або інший твій записаний файл
+sample_file = "out/sentence_1_user.wav"  # або інший твій записаний файл
+
 # ---------- 2) Еталонні фонеми (ARPAbet) ----------
 g2p = G2p()
-arpabet_ref = [p for p in g2p(target_text) if isinstance(p, str)]
-# прибрати цифри наголосу, залишити лише фонеми
-arpabet_ref = [re.sub(r"\d", "", p) for p in arpabet_ref if re.match(r"^[A-Z]+(\d)?$", p)]
+def g2p_word_arpabet(word: str, keep_stress=False):
+    ph = [p for p in g2p(word) if isinstance(p, str)]
+    if not keep_stress:
+        ph = [re.sub(r"\d", "", p) for p in ph]
+    ph = [p for p in ph if re.fullmatch(r"[A-Z]+", p) or re.fullmatch(r"[A-Z]+\d", p)]
+    return ph
+
+# Токенізуємо слова та пунктуацію окремо
+tokens = re.findall(r"\w+|[^\w\s]", target_text)
+arpabet_ref = []
+for tok in tokens:
+    if re.fullmatch(r"\w+", tok):              # слово
+        ph = g2p_word_arpabet(tok.lower(), keep_stress=False)
+        arpabet_ref.extend(ph)
+        arpabet_ref.append("SP")               # коротка пауза між словами
+    else:                                       # пунктуація → більша пауза
+        if tok in [".", "!", "?", ";", ":"]:
+            arpabet_ref.append("SIL")          # довша/фразова пауза
+        elif tok in [","]:
+            arpabet_ref.append("SP2")          # середня пауза
+# прибираємо паузу в кінці, якщо лишилась
+while arpabet_ref and arpabet_ref[-1] in ("SP","SP2","SIL"):
+    arpabet_ref.pop()
+# прибрати цифри наголосу, залишити лише фонеми (але зберегти паузи)
+arpabet_ref = [re.sub(r"\d", "", p) if re.match(r"^[A-Z]+(\d)?$", p) else p for p in arpabet_ref]
 print('------------------------------------------')
 print("REF phones:", arpabet_ref)
-print(arpabet_seq_to_ipa(arpabet_ref))
+print("REF IPA:", arpabet_seq_to_ipa(arpabet_ref))
+
+# Додаткова інформація про паузи
+from utilites import display_pauses_with_symbols, analyze_pause_distribution
+print("REF with pause symbols:", display_pauses_with_symbols(arpabet_ref, "brackets"))
+
+pause_stats = analyze_pause_distribution(arpabet_ref)
+print(f"Pause analysis - Total pauses: {pause_stats['total_pauses']}, Distribution: {pause_stats['pause_distribution']}")
 print('------------------------------------------')
 
 # ---------- 3) Розпізнавання + фонемний алайнмент ----------
@@ -97,10 +127,18 @@ for seg in aligned.get("segments", []):
             continue
         ph = word_to_arpabet(clean.lower())
         arpabet_hyp.extend(ph)
-        # arpabet_hyp.extend([' '])
+        arpabet_hyp.append("SP")  # додаємо паузу між словами
+
+# Прибираємо останню паузу
+while arpabet_hyp and arpabet_hyp[-1] in ("SP", "SP2", "SIL"):
+    arpabet_hyp.pop()
 
 print("HYP phones:", arpabet_hyp)
-print(arpabet_seq_to_ipa(arpabet_hyp))
+print("HYP IPA:", arpabet_seq_to_ipa(arpabet_hyp))
+print("HYP with pause symbols:", display_pauses_with_symbols(arpabet_hyp, "brackets"))
+
+hyp_pause_stats = analyze_pause_distribution(arpabet_hyp)
+print(f"HYP Pause analysis - Total pauses: {hyp_pause_stats['total_pauses']}, Distribution: {hyp_pause_stats['pause_distribution']}")
 
 # ---------- 4) Phone Error Rate (PER) по токенах ----------
 # ВАЖЛИВО: рахуємо редаг-відстань між СПИСКАМИ, а не між рядками

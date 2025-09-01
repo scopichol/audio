@@ -5,10 +5,13 @@ from librosa import effects
 import glob
 import os
 
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+os.environ["HF_HUB_LOCAL_DIR_USE_SYMLINKS"] = "0" 
+
 Ref_file = "sentences/sentence_1.wav"
 output_pattern = "output*.wav"
 
-def compare_pronunciation(ref_path, test_path, sr=16000, n_mfcc=13):
+def compare_pronunciation_MFCC(ref_path, test_path, sr=16000, n_mfcc=13):
     # 1) Завантаження
     y1, _ = librosa.load(ref_path, sr=sr, mono=True)
     y2, _ = librosa.load(test_path, sr=sr, mono=True)
@@ -43,12 +46,72 @@ def compare_pronunciation(ref_path, test_path, sr=16000, n_mfcc=13):
     similarity = float(100.0 * np.exp(-alpha * dist_avg))
     return dist_avg, similarity
 
+def compare_pronunciation_embedding(ref_path, test_path, model_name="speechbrain/spkrec-ecapa-voxceleb"):
+    """
+    Порівнює два аудіо-файли через ембедінги голосу (cosine similarity).
+    Потрібно встановити speechbrain: pip install speechbrain
+    """
+    from speechbrain.inference import SpeakerRecognition
+    from huggingface_hub import snapshot_download
+
+    savedir = r"D:\projects\RobotDreams\GenAI\audio\tmp_spkrec"
+
+    # Качаємо всю репу моделі прямо у savedir БЕЗ symlink-ів
+    snapshot_download(
+        repo_id=model_name,
+        local_dir=str(savedir),
+        local_dir_use_symlinks=False,   # ключове
+    )
+
+    # Тепер ініціалізуємо з локальної папки: SpeechBrain нічого не лінкує/переміщує
+    recognizer = SpeakerRecognition.from_hparams(
+        source=str(savedir),
+        savedir=str(savedir),
+    )   
+    
+    # Отримати косинусну схожість (1.0 - ідеально)
+    score, prediction = recognizer.verify_files(ref_path, test_path)
+    return float(score), bool(prediction)
+
+def compare_pronunciation_embedding2(ref_path, test_path, model_name="speechbrain/spkrec-ecapa-voxceleb"):
+    from pathlib import Path
+    from speechbrain.utils.fetching import fetch, LocalStrategy  # правильні імена
+    from speechbrain.inference import SpeakerRecognition
+
+    model_id = "speechbrain/spkrec-ecapa-voxceleb"
+    savedir = Path(r"D:\projects\RobotDreams\GenAI\audio\tmp_spkrec")
+    savedir.mkdir(parents=True, exist_ok=True)
+
+    # Скачати hyperparams.yaml прямо в savedir, оминаючи symlink
+    print('FETCHING...')
+    fetch(
+        filename="hyperparams.yaml",
+        source=model_id,
+        savedir=str(savedir),
+        local_strategy=LocalStrategy.NO_LINK #LocalStrategy.COPY_SKIP_CACHE,  # 
+    )
+
+    # Далі ініціалізація з локальної теки (файли вже лежать там)
+    recognizer = SpeakerRecognition.from_hparams(
+        source=str(savedir),
+        savedir=str(savedir),
+    )
+    # Отримати косинусну схожість (1.0 - ідеально)
+    score, prediction = recognizer.verify_files(ref_path, test_path)
+    return float(score), bool(prediction)
+
 if __name__ == "__main__":
     output_files = sorted(glob.glob(output_pattern))
     print(f"Reference: {Ref_file}")
     for idx, test_file in enumerate(output_files, 1):
-        dist, score = compare_pronunciation(Ref_file, test_file)
+        dist, score = compare_pronunciation_MFCC(Ref_file, test_file)
         print(f"[{idx}] {os.path.basename(test_file)}: DTW avg distance: {dist:.4f}, Similarity score: {score:.2f}%")
+        # Порівняння через ембедінги голосу
+        try:
+            emb_score, emb_pred = compare_pronunciation_embedding2(Ref_file, test_file)
+            print(f"    Embedding cosine similarity: {emb_score:.4f}, Same speaker: {emb_pred}")
+        except Exception as e:
+            print(f"    Embedding comparison error: {e}")
 
 # # Завантаження двох аудіо
 # y1, sr1 = librosa.load( Ref_file, sr=16000)

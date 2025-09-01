@@ -1,11 +1,16 @@
 .env
 out/
-sentences/
 *.png
+*.mp4
 *.wav
+!/sentences/sentence_*.wav
 *.tsv
 *.txt
+!/requirements.txt 
+!/sentences/sentence_*.txt
 *.csv
 *.pyc
 venv/
 .vscode/
+__pycache__/
+tmp_spkrec/

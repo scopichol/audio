@@ -27,7 +27,7 @@ from utilites import (
 # ------------------------ Налаштування ------------------------
 SR = 16000
 SECONDS = 6
-REFERENCE_NAME = "sentence_1"  # Назва референсного файлу
+REFERENCE_NAME = "sentence_11"  # Назва референсного файлу
 REFERENCE_AUDIO = f"sentences/{REFERENCE_NAME}.wav"
 REFERENCE_TEXT_FILE = f"sentences/{REFERENCE_NAME}.txt"
 AUDIO_OUT = get_output_path(f"{REFERENCE_NAME}_record.wav")  # Зберігаємо з префіксом в каталог out
@@ -120,14 +120,6 @@ def safe_load_whisperx_model(model_name, device):
             print(f"Критична помилка: {e3}")
             raise e3
 
-def normalize_arpabet(seq):
-    """Прибрати цифри стресу, залишити лише A-Z."""
-    cleaned = []
-    for p in seq:
-        p = re.sub(r"\d", "", p)
-        if re.match(r"^[A-Z]+$", p):
-            cleaned.append(p)
-    return cleaned
 
 def g2p_arpabet(text):
     """Конвертує текст в ARPAbet фонеми з паузами між словами"""
@@ -140,7 +132,8 @@ def g2p_arpabet(text):
         clean_word = re.sub(r'[^\w\']+', '', word.lower())
         if clean_word:
             raw = [p for p in g2p(clean_word) if isinstance(p, str)]
-            word_phonemes = normalize_arpabet(raw)
+            # Залишаємо фонеми як є, з наголосами
+            word_phonemes = [p for p in raw if re.match(r"^[A-Z]+(\d)?$", p)]
             all_phonemes.extend(word_phonemes)
             
             # Додаємо паузу після кожного слова (крім останнього)
@@ -158,9 +151,9 @@ def extract_hyp_arpabet_from_whisperx(aligned_segments):
     g2p = G2p()
     
     def word_to_arpabet(word: str):
-        # g2p_en повертає мікс токенів, заберемо лише фонеми; приберемо цифри наголосу
+        # g2p_en повертає мікс токенів, заберемо лише фонеми; залишаємо наголоси
         ph = [p for p in g2p(word) if isinstance(p, str)]
-        ph = [re.sub(r"\d", "", p) for p in ph if re.match(r"^[A-Z]+(\d)?$", p)]
+        ph = [p for p in ph if re.match(r"^[A-Z]+(\d)?$", p)]
         return ph
     
     hyp = []
