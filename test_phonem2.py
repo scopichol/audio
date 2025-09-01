@@ -5,6 +5,8 @@ import math
 import time
 import itertools
 import warnings
+import subprocess
+import tempfile
 warnings.filterwarnings("ignore")
 
 import sounddevice as sd
@@ -17,6 +19,12 @@ import pandas as pd
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
 
+# Імпорти для аудіо
+try:
+    import soundfile as sf
+except ImportError:
+    sf = None
+
 from utilites import (
     get_output_path, play_beep_signal, arpabet_token_to_ipa, 
     arpabet_seq_to_ipa, save_confusion_matrix, save_hyp_phones_csv, 
@@ -27,7 +35,7 @@ from utilites import (
 # ------------------------ Налаштування ------------------------
 SR = 16000
 SECONDS = 6
-REFERENCE_NAME = "sentence_1"  # Назва референсного файлу
+REFERENCE_NAME = "sentence_12"  # Назва референсного файлу
 REFERENCE_AUDIO = f"sentences/{REFERENCE_NAME}.wav"
 REFERENCE_TEXT_FILE = f"sentences/{REFERENCE_NAME}.txt"
 AUDIO_OUT = get_output_path(f"{REFERENCE_NAME}_record.wav")  # Зберігаємо з префіксом в каталог out
@@ -36,7 +44,71 @@ MODEL_NAME = "small.en"  # можна "base.en"/"medium.en"/"large-v3"
 LANG_CODE = "en"         # для align-моделі
 
 
+# ------------------------ Діагностика ------------------------
+def check_system_status():
+    """Перевіряє статус всіх компонентів системи"""
+    print("🔍 Перевірка системи...")
+    
+    # Перевіряємо аудіо
+    try:
+        import sounddevice as sd
+        import soundfile as sf
+        print("✅ Аудіо система: OK")
+    except ImportError as e:
+        print(f"❌ Аудіо система: {e}")
+    
+    # Перевіряємо ML
+    try:
+        import torch
+        print(f"✅ PyTorch: {torch.__version__}")
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"✅ Пристрій: {device}")
+    except ImportError as e:
+        print(f"❌ PyTorch: {e}")
+    
+    try:
+        import whisperx
+        print("✅ WhisperX: OK")
+    except ImportError as e:
+        print(f"❌ WhisperX: {e}")
+    
+    # Перевіряємо TTS
+    available_tts = check_tts_availability()
+    if available_tts:
+        print(f"✅ TTS системи: {', '.join(available_tts)}")
+    else:
+        print("❌ TTS системи: Недоступні")
+    
+    # Перевіряємо файли
+    if os.path.exists(REFERENCE_TEXT_FILE):
+        print(f"✅ Текстовий файл: {REFERENCE_TEXT_FILE}")
+    else:
+        print(f"❌ Текстовий файл: {REFERENCE_TEXT_FILE} відсутній")
+    
+    if os.path.exists(REFERENCE_AUDIO):
+        print(f"✅ Аудіо файл: {REFERENCE_AUDIO}")
+    else:
+        print(f"❌ Аудіо файл: {REFERENCE_AUDIO} відсутній")
+    
+    print("🔍 Перевірка завершена\n")
+
 # ------------------------ Утіліти ------------------------
+def create_reference_text_file(text_file_path, text_content):
+    """Створює референсний текстовий файл"""
+    try:
+        # Створюємо директорію якщо не існує
+        os.makedirs(os.path.dirname(text_file_path), exist_ok=True)
+        
+        with open(text_file_path, 'w', encoding='utf-8') as f:
+            f.write(text_content)
+        
+        print(f"✅ Створено референсний текстовий файл: {text_file_path}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Помилка створення текстового файлу {text_file_path}: {e}")
+        return False
+
 def read_reference_text(text_file_path):
     """Читає текст з референсного файлу"""
     try:
@@ -49,6 +121,162 @@ def read_reference_text(text_file_path):
     except Exception as e:
         print(f"❌ Помилка читання файлу {text_file_path}: {e}")
         return None
+
+def check_tts_availability():
+    """Перевіряє доступність TTS систем та повертає список доступних варіантів"""
+    available_tts = []
+    
+    # Перевіряємо gTTS
+    try:
+        import gtts
+        import pydub
+        available_tts.append("gTTS (Google Text-to-Speech)")
+    except ImportError:
+        pass
+    
+    # Перевіряємо pyttsx3
+    try:
+        import pyttsx3
+        available_tts.append("pyttsx3 (Offline TTS)")
+    except ImportError:
+        pass
+    
+    # Перевіряємо espeak
+    try:
+        import subprocess
+        result = subprocess.run(["espeak", "--version"], capture_output=True, text=True)
+        if result.returncode == 0:
+            available_tts.append("espeak (System TTS)")
+    except (FileNotFoundError, subprocess.SubprocessError):
+        pass
+    
+    return available_tts
+
+def generate_reference_audio(text, audio_file_path, language="en"):
+    """Генерує референсний аудіо файл з тексту за допомогою TTS"""
+    try:
+        print(f"🎤 Генеруємо референсний аудіо для: '{text}'")
+        
+        # Перевіряємо доступні TTS системи
+        available_tts = check_tts_availability()
+        if not available_tts:
+            print("❌ Жодна TTS система не доступна")
+            print("💡 Встановіть одну з TTS бібліотек:")
+            print("   pip install gtts pydub")
+            print("   pip install pyttsx3")
+            print("   sudo apt-get install espeak (Linux)")
+            return False
+        
+        print(f"📢 Доступні TTS системи: {', '.join(available_tts)}")
+        
+        # Спробуємо різні TTS бібліотеки
+        success = False
+        
+        # Варіант 1: gTTS (Google Text-to-Speech)
+        try:
+            from gtts import gTTS
+            import tempfile
+            
+            print("🔄 Спроба генерації через gTTS...")
+            tts = gTTS(text=text, lang=language, slow=False)
+            
+            # Створюємо директорію якщо не існує
+            os.makedirs(os.path.dirname(audio_file_path), exist_ok=True)
+            
+            # Зберігаємо як MP3, потім конвертуємо в WAV
+            temp_mp3 = tempfile.mktemp(suffix='.mp3')
+            tts.save(temp_mp3)
+            
+            # Конвертуємо MP3 в WAV
+            try:
+                from pydub import AudioSegment
+                audio = AudioSegment.from_mp3(temp_mp3)
+                audio.export(audio_file_path, format="wav")
+                success = True
+                print(f"✅ Аудіо згенеровано через gTTS: {audio_file_path}")
+            except ImportError:
+                print("⚠️ pydub не встановлено для конвертації MP3->WAV")
+            finally:
+                if os.path.exists(temp_mp3):
+                    os.remove(temp_mp3)
+                    
+        except ImportError:
+            print("⚠️ gTTS не встановлено")
+        except Exception as e:
+            print(f"⚠️ gTTS помилка: {e}")
+        
+        # Варіант 2: pyttsx3 (офлайн TTS)
+        if not success:
+            try:
+                import pyttsx3
+                
+                print("🔄 Спроба генерації через pyttsx3...")
+                engine = pyttsx3.init()
+                
+                # Налаштування голосу
+                voices = engine.getProperty('voices')
+                for voice in voices:
+                    if language == "en" and "english" in voice.name.lower():
+                        engine.setProperty('voice', voice.id)
+                        break
+                
+                # Налаштування швидкості та гучності
+                engine.setProperty('rate', 150)  # швидкість
+                engine.setProperty('volume', 0.9)  # гучність
+                
+                # Створюємо директорію якщо не існує
+                os.makedirs(os.path.dirname(audio_file_path), exist_ok=True)
+                
+                # Зберігаємо аудіо
+                engine.save_to_file(text, audio_file_path)
+                engine.runAndWait()
+                
+                success = True
+                print(f"✅ Аудіо згенеровано через pyttsx3: {audio_file_path}")
+                
+            except ImportError:
+                print("⚠️ pyttsx3 не встановлено")
+            except Exception as e:
+                print(f"⚠️ pyttsx3 помилка: {e}")
+        
+        # Варіант 3: espeak (Linux/Mac)
+        if not success:
+            try:
+                import subprocess
+                
+                print("🔄 Спроба генерації через espeak...")
+                # Створюємо директорію якщо не існує
+                os.makedirs(os.path.dirname(audio_file_path), exist_ok=True)
+                
+                cmd = [
+                    "espeak", 
+                    "-s", "150",  # швидкість
+                    "-v", f"{language}",  # мова
+                    "-w", audio_file_path,  # вихідний файл
+                    text
+                ]
+                
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode == 0:
+                    success = True
+                    print(f"✅ Аудіо згенеровано через espeak: {audio_file_path}")
+                else:
+                    print(f"⚠️ espeak помилка: {result.stderr}")
+                    
+            except FileNotFoundError:
+                print("⚠️ espeak не встановлено")
+            except Exception as e:
+                print(f"⚠️ espeak помилка: {e}")
+        
+        if not success:
+            print("❌ Всі TTS системи недоступні або видали помилку")
+            print("💡 Встановіть та налаштуйте одну з TTS бібліотек (див. TTS_SETUP.md)")
+        
+        return success
+        
+    except Exception as e:
+        print(f"❌ Критична помилка генерації аудіо: {e}")
+        return False
 
 def play_reference_audio(audio_file_path):
     """Відтворює референсний аудіо файл"""
@@ -96,28 +324,35 @@ def pick_compute_type(device: str) -> str:
 
 def safe_load_whisperx_model(model_name, device):
     """Безпечне завантаження моделі WhisperX з автоматичним вибором compute_type."""
+    print(f"🔄 Починаємо завантаження моделі {model_name}...")
     compute_type = pick_compute_type(device)
     
     try:
-        print(f"Спроба завантаження з compute_type={compute_type}")
-        return whisperx.load_model(model_name, device=device, compute_type=compute_type)
+        print(f"🔄 Спроба завантаження з compute_type={compute_type}")
+        model = whisperx.load_model(model_name, device=device, compute_type=compute_type)
+        print(f"✅ Модель {model_name} успішно завантажена")
+        return model
     except Exception as e:
-        print(f"Помилка з compute_type={compute_type}: {e}")
+        print(f"❌ Помилка з compute_type={compute_type}: {e}")
         
         # Якщо не вдалося, спробуємо з int8
         if compute_type != "int8":
             try:
-                print("Спроба з compute_type=int8")
-                return whisperx.load_model(model_name, device=device, compute_type="int8")
+                print("🔄 Спроба з compute_type=int8")
+                model = whisperx.load_model(model_name, device=device, compute_type="int8")
+                print(f"✅ Модель {model_name} завантажена з int8")
+                return model
             except Exception as e2:
-                print(f"Помилка з int8: {e2}")
+                print(f"❌ Помилка з int8: {e2}")
         
         # Якщо і int8 не працює, спробуємо без compute_type (за замовчуванням)
         try:
-            print("Спроба без compute_type (за замовчуванням)")
-            return whisperx.load_model(model_name, device=device)
+            print("🔄 Спроба без compute_type (за замовчуванням)")
+            model = whisperx.load_model(model_name, device=device)
+            print(f"✅ Модель {model_name} завантажена за замовчуванням")
+            return model
         except Exception as e3:
-            print(f"Критична помилка: {e3}")
+            print(f"❌ Критична помилка: {e3}")
             raise e3
 
 
@@ -738,114 +973,156 @@ def analyze_error_patterns(ref_phones, hyp_phones):
 
 # ------------------------ Основний сценарій ------------------------
 def main():
-    # Читаємо референсний текст
-    target_text = read_reference_text(REFERENCE_TEXT_FILE)
-    if not target_text:
-        print(f"❌ Використовуємо стандартний текст замість файлу {REFERENCE_TEXT_FILE}")
-        target_text = TARGET_TEXT
-    else:
-        print(f"✅ Референсний текст завантажено з {REFERENCE_TEXT_FILE}")
+    print("🚀 Запуск системи аналізу вимови")
+    print("=" * 50)
     
-    print(f'🎯 Фраза для вимови: "{target_text}"')
-    
-    # Відтворюємо референсний аудіо файл
-    print("\n🔊 Спочатку послухайте референсний зразок:")
-    if not play_reference_audio(REFERENCE_AUDIO):
-        print("⚠️ Не вдалося відтворити референсний аудіо, продовжуємо без нього...")
-    
-    # Пауза між референсним аудіо та записом
-    print("\n⏳ Готуйтесь до запису через 2 секунди...")
-    time.sleep(2)
-    
-    # Подаємо звуковий сигнал перед записом
-    play_beep_signal(frequency=800, duration=0.3, count=3)
-    
-    print("🎤 Запис...")
-    audio = sd.rec(int(SECONDS * SR), samplerate=SR, channels=1, dtype='int16')
-    sd.wait()
-    write(AUDIO_OUT, SR, audio)
-    print(f"✅ Аудіо збережено: {AUDIO_OUT}")
+    try:
+        # Спочатку перевіряємо стан системи
+        check_system_status()
+        
+        # Читаємо референсний текст
+        print("📄 Завантаження референсного тексту...")
+        target_text = read_reference_text(REFERENCE_TEXT_FILE)
+        if not target_text:
+            print(f"❌ Використовуємо стандартний текст замість файлу {REFERENCE_TEXT_FILE}")
+            target_text = TARGET_TEXT
+            
+            # Створюємо референсний текстовий файл зі стандартним текстом
+            print(f"📄 Створюємо референсний текстовий файл...")
+            create_reference_text_file(REFERENCE_TEXT_FILE, target_text)
+        else:
+            print(f"✅ Референсний текст завантажено з {REFERENCE_TEXT_FILE}")
+        
+        print(f'🎯 Фраза для вимови: "{target_text}"')
+        
+        # Відтворюємо референсний аудіо файл
+        print("\n🔊 Підготовка референсного аудіо...")
+        
+        # Перевіряємо чи існує референсний аудіо файл
+        if not os.path.exists(REFERENCE_AUDIO):
+            print(f"⚠️ Референсний аудіо файл {REFERENCE_AUDIO} не знайдено")
+            print("🎤 Генеруємо референсний аудіо з тексту...")
+            
+            if generate_reference_audio(target_text, REFERENCE_AUDIO, language="en"):
+                print("✅ Референсний аудіо успішно згенеровано")
+            else:
+                print("❌ Не вдалося згенерувати референсний аудіо")
+                print("💡 Встановіть одну з TTS бібліотек (див. TTS_SETUP.md)")
+                print("⚠️ Продовжуємо без референсного аудіо...")
+        
+        # Відтворюємо аудіо (згенерований або існуючий)
+        print("🔊 Відтворення референсного зразка...")
+        if not play_reference_audio(REFERENCE_AUDIO):
+            print("⚠️ Не вдалося відтворити референсний аудіо, продовжуємо без нього...")
+        
+        # Пауза між референсним аудіо та записом
+        print("\n⏳ Готуйтесь до запису через 2 секунди...")
+        time.sleep(2)
+        
+        # Подаємо звуковий сигнал перед записом
+        play_beep_signal(frequency=800, duration=0.3, count=3)
+        
+        print("🎤 Запис...")
+        audio = sd.rec(int(SECONDS * SR), samplerate=SR, channels=1, dtype='int16')
+        sd.wait()
+        write(AUDIO_OUT, SR, audio)
+        print(f"✅ Аудіо збережено: {AUDIO_OUT}")
 
-    # 1) Еталонні фонеми
-    ref_phones = g2p_arpabet(target_text)
-    ref_ipa = arpabet_seq_to_ipa(ref_phones)
-    print(f"📝 Еталонні фонеми (ARPAbet): {ref_phones}")
-    print(f"📝 Еталонні фонеми (IPA): {ref_ipa}")
+        # 1) Еталонні фонеми
+        print("\n📝 Генерація еталонних фонем...")
+        ref_phones = g2p_arpabet(target_text)
+        ref_ipa = arpabet_seq_to_ipa(ref_phones)
+        print(f"📝 Еталонні фонеми (ARPAbet): {ref_phones}")
+        print(f"📝 Еталонні фонеми (IPA): {ref_ipa}")
 
-    # 2) ASR + Align
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"🚀 Завантаження WhisperX ({MODEL_NAME}) на {device}...")
-    
-    asr_model = safe_load_whisperx_model(MODEL_NAME, device)
-    res = asr_model.transcribe(AUDIO_OUT)
-    
-    # Правильна обробка результату ASR
-    asr_text = " ".join(seg["text"].strip() for seg in res["segments"])
-    print(f"🗣️ ASR розпізнав: {asr_text}")
+        # 2) ASR + Align
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"\n🚀 Завантаження WhisperX ({MODEL_NAME}) на {device}...")
+        
+        asr_model = safe_load_whisperx_model(MODEL_NAME, device)
+        print("🔄 Транскрибування вашого запису...")
+        res = asr_model.transcribe(AUDIO_OUT)
+        
+        # Правильна обробка результату ASR
+        asr_text = " ".join(seg["text"].strip() for seg in res["segments"])
+        print(f"🗣️ ASR розпізнав: '{asr_text}'")
 
-    # Використаємо align-модель (англійська)
-    align_model, metadata = whisperx.load_align_model(language_code=LANG_CODE, device=device)
-    aligned = whisperx.align(res["segments"], align_model, metadata, AUDIO_OUT, device=device)
+        # Використаємо align-модель (англійська)
+        print("🔄 Завантаження align моделі...")
+        align_model, metadata = whisperx.load_align_model(language_code=LANG_CODE, device=device)
+        print("🔄 Вирівнювання слів та фонем...")
+        aligned = whisperx.align(res["segments"], align_model, metadata, AUDIO_OUT, device=device)
 
-    # 3) Витяг гіпотезних фонем + CSV
-    hyp_phones, phone_rows = extract_hyp_arpabet_from_whisperx(aligned.get("segments", []))
-    hyp_ipa = arpabet_seq_to_ipa(hyp_phones)
-    print(f"🎯 Розпізнані фонеми (ARPAbet): {hyp_phones}")
-    print(f"🎯 Розпізнані фонеми (IPA): {hyp_ipa}")
+        # 3) Витяг гіпотезних фонем + CSV
+        print("🔄 Витяг фонем з результатів...")
+        hyp_phones, phone_rows = extract_hyp_arpabet_from_whisperx(aligned.get("segments", []))
+        hyp_ipa = arpabet_seq_to_ipa(hyp_phones)
+        print(f"🎯 Розпізнані фонеми (ARPAbet): {hyp_phones}")
+        print(f"🎯 Розпізнані фонеми (IPA): {hyp_ipa}")
 
-    save_hyp_phones_csv(phone_rows, "phones_timing.csv", prefix=REFERENCE_NAME)
-    plot_timeline(phone_rows, "phones_timeline.png", prefix=REFERENCE_NAME)
+        save_hyp_phones_csv(phone_rows, "phones_timing.csv", prefix=REFERENCE_NAME)
+        plot_timeline(phone_rows, "phones_timeline.png", prefix=REFERENCE_NAME)
 
-    # 4) PER + детальний аналіз
-    per = compute_per(ref_phones, hyp_phones)
-    print(f"\n📊 PER (Phone Error Rate) = {per:.3f} (0.0 = ідеально)")
+        # 4) PER + детальний аналіз
+        print("\n📊 Обчислення метрик...")
+        per = compute_per(ref_phones, hyp_phones)
+        print(f"📊 PER (Phone Error Rate) = {per:.3f} (0.0 = ідеально)")
 
-    # 5) WER (Word Error Rate) + детальний аналіз слів
-    wer = compute_wer(target_text, asr_text)
-    print(f"📊 WER (Word Error Rate) = {wer:.3f} (0.0 = ідеально)")
-    
-    # Детальне порівняння слів
-    word_comparison_results = print_word_alignment(target_text, asr_text)
+        # 5) WER (Word Error Rate) + детальний аналіз слів
+        wer = compute_wer(target_text, asr_text)
+        print(f"📊 WER (Word Error Rate) = {wer:.3f} (0.0 = ідеально)")
+        
+        # Детальне порівняння слів
+        word_comparison_results = print_word_alignment(target_text, asr_text)
 
-    # Детальне порівняння фонем з IPA відображенням
-    comparison_results = print_phoneme_alignment(ref_phones, hyp_phones)
-    analyze_error_patterns(ref_phones, hyp_phones)
-    plot_phoneme_comparison(ref_phones, hyp_phones, "phoneme_comparison.png", prefix=REFERENCE_NAME, 
-                          ref_text=target_text, hyp_text=asr_text)
+        # Детальне порівняння фонем з IPA відображенням
+        comparison_results = print_phoneme_alignment(ref_phones, hyp_phones)
+        analyze_error_patterns(ref_phones, hyp_phones)
+        plot_phoneme_comparison(ref_phones, hyp_phones, "phoneme_comparison.png", prefix=REFERENCE_NAME, 
+                              ref_text=target_text, hyp_text=asr_text)
 
-    # Матриця плутанин
-    save_confusion_matrix(ref_phones, hyp_phones, out_png="phones_confusion.png", include_eps=False, prefix=REFERENCE_NAME)
+        # Матриця плутанин
+        save_confusion_matrix(ref_phones, hyp_phones, out_png="phones_confusion.png", include_eps=False, prefix=REFERENCE_NAME)
 
-    # 6) Збережемо результати у JSON
-    json_path = get_output_path(f"{REFERENCE_NAME}_phones_ref_hyp.json")
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "reference_file": REFERENCE_NAME,
-            "target_text": target_text,
-            "asr_text": asr_text,
-            "ref_phones_arpabet": ref_phones,
-            "ref_phones_ipa": ref_ipa,
-            "hyp_phones_arpabet": hyp_phones,
-            "hyp_phones_ipa": hyp_ipa,
-            "per": per,
-            "wer": wer,
-            "phoneme_accuracy": comparison_results["accuracy"],
-            "word_accuracy": (1 - word_comparison_results["wer"]) * 100,
-            "phoneme_errors": {
-                "substitutions": comparison_results["substitutions"],
-                "insertions": comparison_results["insertions"],
-                "deletions": comparison_results["deletions"]
-            },
-            "word_errors": {
-                "correct": word_comparison_results["correct"],
-                "substitutions": word_comparison_results["substitutions"],
-                "insertions": word_comparison_results["insertions"],
-                "deletions": word_comparison_results["deletions"]
-            }
-        }, f, ensure_ascii=False, indent=2)
-    print(f"💾 Результати збережено у: {json_path}")
-    
-    print(f"\n📁 Всі файли збережено в каталозі: {os.path.abspath('out')}")
+        # 6) Збережемо результати у JSON
+        print("💾 Збереження результатів...")
+        json_path = get_output_path(f"{REFERENCE_NAME}_phones_ref_hyp.json")
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "reference_file": REFERENCE_NAME,
+                "target_text": target_text,
+                "asr_text": asr_text,
+                "ref_phones_arpabet": ref_phones,
+                "ref_phones_ipa": ref_ipa,
+                "hyp_phones_arpabet": hyp_phones,
+                "hyp_phones_ipa": hyp_ipa,
+                "per": per,
+                "wer": wer,
+                "phoneme_accuracy": comparison_results["accuracy"],
+                "word_accuracy": (1 - word_comparison_results["wer"]) * 100,
+                "phoneme_errors": {
+                    "substitutions": comparison_results["substitutions"],
+                    "insertions": comparison_results["insertions"],
+                    "deletions": comparison_results["deletions"]
+                },
+                "word_errors": {
+                    "correct": word_comparison_results["correct"],
+                    "substitutions": word_comparison_results["substitutions"],
+                    "insertions": word_comparison_results["insertions"],
+                    "deletions": word_comparison_results["deletions"]
+                }
+            }, f, ensure_ascii=False, indent=2)
+        print(f"💾 Результати збережено у: {json_path}")
+        
+        print(f"\n📁 Всі файли збережено в каталозі: {os.path.abspath('out')}")
+        print("🎉 Аналіз завершено успішно!")
+        
+    except KeyboardInterrupt:
+        print("\n⚠️ Програма перервана користувачем")
+    except Exception as e:
+        print(f"\n❌ Помилка в програмі: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()

@@ -1,3 +1,4 @@
+# Core dependencies
 aiohappyeyeballs==2.6.1
 aiohttp==3.12.15
 aiosignal==1.4.0
@@ -43,7 +44,21 @@ joblib==1.5.2
 julius==0.2.7
 kiwisolver==1.4.9
 lazy_loader==0.4
-Levenshtein==0.27.1
+Levenshtein==0.27.0
+librosa==0.11.0
+lightning==2.5.4
+lightning-utilities==0.15.2
+llvmlite==0.44.0
+
+# Text-to-Speech (TTS) dependencies for audio generation
+# Install these for automatic reference audio generation:
+gtts>=2.3.0           # Google Text-to-Speech (requires internet)
+pydub>=0.25.0         # Audio format conversion for gTTS
+pyttsx3>=2.9.0        # Offline TTS (cross-platform)
+
+# Optional: For better audio processing
+soundfile>=0.12.0     # Audio file reading/writing
+sounddevice>=0.4.0    # Audio recording/playback
 librosa==0.11.0
 lightning==2.5.4
 lightning-utilities==0.15.2
