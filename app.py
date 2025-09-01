@@ -5,6 +5,7 @@ from write_audio import record_audio
 import sounddevice as sd
 import soundfile as sf
 import jiwer 
+from utilites import read_reference_text
 
 def analyze_pitch(audio_path):
     snd = parselmouth.Sound(audio_path)
@@ -76,19 +77,6 @@ def play_beep(duration=0.3, freq=1000, fs=44100):
     beep = (np.sin(2 * np.pi * freq * t) * 32767).astype(np.int16)
     sd.play(beep, fs)
     sd.wait()
-
-def read_reference_text(audio_path):
-    """
-    Читає референсний текст для аудіо-файлу.
-    Шукає файл з таким же ім'ям, але з розширенням .txt.
-    """
-    import os
-    txt_path = os.path.splitext(audio_path)[0] + ".txt"
-    try:
-        with open(txt_path, "r", encoding="utf-8") as f:
-            return f.read().strip()
-    except Exception:
-        return ""
 
 # Example usage:
 sample_file = "sentences/sentence_1.wav"
