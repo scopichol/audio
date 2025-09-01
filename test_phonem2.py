@@ -27,7 +27,7 @@ from utilites import (
 # ------------------------ Налаштування ------------------------
 SR = 16000
 SECONDS = 6
-REFERENCE_NAME = "sentence_11"  # Назва референсного файлу
+REFERENCE_NAME = "sentence_1"  # Назва референсного файлу
 REFERENCE_AUDIO = f"sentences/{REFERENCE_NAME}.wav"
 REFERENCE_TEXT_FILE = f"sentences/{REFERENCE_NAME}.txt"
 AUDIO_OUT = get_output_path(f"{REFERENCE_NAME}_record.wav")  # Зберігаємо з префіксом в каталог out
