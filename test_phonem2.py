@@ -126,6 +126,13 @@ def check_tts_availability():
     """Перевіряє доступність TTS систем та повертає список доступних варіантів"""
     available_tts = []
     
+    # Перевіряємо Coqui TTS
+    try:
+        from TTS.api import TTS
+        available_tts.append("Coqui TTS (AI Neural)")
+    except ImportError:
+        pass
+    
     # Перевіряємо gTTS
     try:
         import gtts
@@ -162,9 +169,10 @@ def generate_reference_audio(text, audio_file_path, language="en"):
         if not available_tts:
             print("❌ Жодна TTS система не доступна")
             print("💡 Встановіть одну з TTS бібліотек:")
-            print("   pip install gtts pydub")
-            print("   pip install pyttsx3")
-            print("   sudo apt-get install espeak (Linux)")
+            print("   pip install TTS                    # Coqui TTS (найкраща якість)")
+            print("   pip install gtts pydub             # Google TTS")
+            print("   pip install pyttsx3                # Offline TTS")
+            print("   sudo apt-get install espeak        # espeak (Linux)")
             return False
         
         print(f"📢 Доступні TTS системи: {', '.join(available_tts)}")
@@ -172,40 +180,73 @@ def generate_reference_audio(text, audio_file_path, language="en"):
         # Спробуємо різні TTS бібліотеки
         success = False
         
-        # Варіант 1: gTTS (Google Text-to-Speech)
-        try:
-            from gtts import gTTS
-            import tempfile
-            
-            print("🔄 Спроба генерації через gTTS...")
-            tts = gTTS(text=text, lang=language, slow=False)
-            
-            # Створюємо директорію якщо не існує
-            os.makedirs(os.path.dirname(audio_file_path), exist_ok=True)
-            
-            # Зберігаємо як MP3, потім конвертуємо в WAV
-            temp_mp3 = tempfile.mktemp(suffix='.mp3')
-            tts.save(temp_mp3)
-            
-            # Конвертуємо MP3 в WAV
+        # Варіант 1: Coqui TTS (AI-based, найкраща якість)
+        if not success:
             try:
-                from pydub import AudioSegment
-                audio = AudioSegment.from_mp3(temp_mp3)
-                audio.export(audio_file_path, format="wav")
+                from TTS.api import TTS
+                import torch
+                
+                print("🔄 Спроба генерації через Coqui TTS...")
+                
+                # Створюємо директорію якщо не існує
+                os.makedirs(os.path.dirname(audio_file_path), exist_ok=True)
+                
+                # Обираємо модель залежно від мови
+                if language == "en":
+                    model_name = "tts_models/en/ljspeech/tacotron2-DDC"
+                else:
+                    model_name = "tts_models/multilingual/multi-dataset/xtts_v2"
+                
+                # Ініціалізуємо TTS
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                tts = TTS(model_name=model_name, progress_bar=False, gpu=(device == "cuda"))
+                
+                # Генеруємо аудіо
+                tts.tts_to_file(text=text, file_path=audio_file_path)
+                
                 success = True
-                print(f"✅ Аудіо згенеровано через gTTS: {audio_file_path}")
+                print(f"✅ Аудіо згенеровано через Coqui TTS: {audio_file_path}")
+                
             except ImportError:
-                print("⚠️ pydub не встановлено для конвертації MP3->WAV")
-            finally:
-                if os.path.exists(temp_mp3):
-                    os.remove(temp_mp3)
-                    
-        except ImportError:
-            print("⚠️ gTTS не встановлено")
-        except Exception as e:
-            print(f"⚠️ gTTS помилка: {e}")
+                print("⚠️ Coqui TTS не встановлено")
+            except Exception as e:
+                print(f"⚠️ Coqui TTS помилка: {e}")
         
-        # Варіант 2: pyttsx3 (офлайн TTS)
+        # Варіант 2: gTTS (Google Text-to-Speech)
+        if not success:
+            try:
+                from gtts import gTTS
+                import tempfile
+                
+                print("🔄 Спроба генерації через gTTS...")
+                tts = gTTS(text=text, lang=language, slow=False)
+                
+                # Створюємо директорію якщо не існує
+                os.makedirs(os.path.dirname(audio_file_path), exist_ok=True)
+                
+                # Зберігаємо як MP3, потім конвертуємо в WAV
+                temp_mp3 = tempfile.mktemp(suffix='.mp3')
+                tts.save(temp_mp3)
+                
+                # Конвертуємо MP3 в WAV
+                try:
+                    from pydub import AudioSegment
+                    audio = AudioSegment.from_mp3(temp_mp3)
+                    audio.export(audio_file_path, format="wav")
+                    success = True
+                    print(f"✅ Аудіо згенеровано через gTTS: {audio_file_path}")
+                except ImportError:
+                    print("⚠️ pydub не встановлено для конвертації MP3->WAV")
+                finally:
+                    if os.path.exists(temp_mp3):
+                        os.remove(temp_mp3)
+                        
+            except ImportError:
+                print("⚠️ gTTS не встановлено")
+            except Exception as e:
+                print(f"⚠️ gTTS помилка: {e}")
+        
+        # Варіант 3: pyttsx3 (офлайн TTS)
         if not success:
             try:
                 import pyttsx3
@@ -239,7 +280,7 @@ def generate_reference_audio(text, audio_file_path, language="en"):
             except Exception as e:
                 print(f"⚠️ pyttsx3 помилка: {e}")
         
-        # Варіант 3: espeak (Linux/Mac)
+        # Варіант 4: espeak (Linux/Mac)
         if not success:
             try:
                 import subprocess
