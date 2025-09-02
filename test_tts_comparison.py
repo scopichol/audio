@@ -8,6 +8,75 @@ import tempfile
 import subprocess
 from pathlib import Path
 
+def setup_pytorch_safe_globals():
+    """Налаштовує безпечні globals для PyTorch 2.6+"""
+    try:
+        import torch
+        import numpy as np
+        
+        # Додаємо numpy multiarray.scalar до безпечних globals (сучасний спосіб)
+        if hasattr(torch.serialization, 'add_safe_globals'):
+            try:
+                # Спробуємо новий спосіб (numpy 1.20+)
+                torch.serialization.add_safe_globals([np._core.multiarray.scalar])
+                print("✅ PyTorch безпечні globals налаштовано (numpy._core)")
+            except AttributeError:
+                # Якщо не працює, використовуємо старий спосіб
+                torch.serialization.add_safe_globals([np.core.multiarray.scalar])
+                print("✅ PyTorch безпечні globals налаштовано (numpy.core)")
+            
+            # Додатково патчимо torch.load для Bark
+            original_torch_load = torch.load
+            def patched_torch_load(*args, **kwargs):
+                # Встановлюємо weights_only=False для Bark моделей
+                if 'weights_only' not in kwargs:
+                    kwargs['weights_only'] = False
+                return original_torch_load(*args, **kwargs)
+            
+            torch.load = patched_torch_load
+            print("✅ PyTorch.load патч застосовано для Bark")
+            return True
+        else:
+            print("⚠️ Стара версія PyTorch - безпечні globals недоступні")
+            return False
+    except Exception as e:
+        print(f"⚠️ Помилка налаштування PyTorch: {e}")
+        return False
+
+def patch_torch_for_bark():
+    """Додатковий патч для роботи з Bark TTS"""
+    try:
+        import torch
+        import numpy as np
+        
+        # Патчимо torch.load щоб завжди використовувати weights_only=False
+        if not hasattr(torch.load, '_bark_patched'):
+            original_load = torch.load
+            
+            def safe_load(*args, **kwargs):
+                kwargs['weights_only'] = False
+                return original_load(*args, **kwargs)
+            
+            torch.load = safe_load
+            torch.load._bark_patched = True
+            print("🔧 Додатковий патч torch.load застосовано")
+        
+        # Додаємо globals якщо можливо
+        if hasattr(torch.serialization, 'add_safe_globals'):
+            try:
+                torch.serialization.add_safe_globals([np.core.multiarray.scalar])
+            except:
+                pass
+            try:
+                torch.serialization.add_safe_globals([np._core.multiarray.scalar])
+            except:
+                pass
+        
+        return True
+    except Exception as e:
+        print(f"⚠️ Помилка патчингу: {e}")
+        return False
+
 def test_gtts(text, output_file, language="en"):
     """Тестує Google Text-to-Speech"""
     try:
@@ -206,6 +275,106 @@ def test_coqui_tts(text, output_file, language="en"):
             "features": {}
         }
 
+def test_bark_tts(text, output_file, language="en"):
+    """Тестує Bark TTS (AI клонування голосу)"""
+    try:
+        # Патчимо PyTorch перед імпортом Bark
+        patch_torch_for_bark()
+        
+        import torch
+        from bark import SAMPLE_RATE, generate_audio, preload_models
+        from scipy.io.wavfile import write as write_wav
+        import numpy as np
+        
+        print("🔄 Тестування Bark TTS (AI Voice Cloning)...")
+        start_time = time.time()
+        
+        # Створюємо директорію якщо не існує
+        os.makedirs(os.path.dirname(output_file), exist_ok=True)
+        
+        # Завантажуємо моделі (може зайняти час при першому запуску)
+        print("📥 Завантаження моделей Bark...")
+        
+        # Простий виклик - покладаємося на глобальний патч PyTorch
+        try:
+            preload_models()
+        except Exception as model_error:
+            # Якщо не працює, повертаємо помилку
+            return {
+                "success": False,
+                "duration": 0,
+                "file_size": 0,
+                "error": f"Помилка завантаження моделей Bark: {model_error}",
+                "features": {}
+            }
+        
+        # Обираємо голос залежно від мови
+        if language == "en":
+            # Англійські голоси: v2/en_speaker_0 до v2/en_speaker_9
+            voice_preset = "v2/en_speaker_6"  # Нейтральний чоловічий голос
+        else:
+            voice_preset = "v2/en_speaker_6"  # За замовчуванням англійський
+        
+        # Генеруємо аудіо
+        print(f"🎵 Генерація з голосом: {voice_preset}")
+        
+        # Простий виклик - покладаємося на глобальний патч PyTorch
+        audio_array = generate_audio(text, history_prompt=voice_preset)
+        
+        # Конвертуємо до правильного формату та зберігаємо
+        audio_array = (audio_array * 32767).astype(np.int16)
+        write_wav(output_file, SAMPLE_RATE, audio_array)
+        
+        duration = time.time() - start_time
+        file_size = os.path.getsize(output_file) if os.path.exists(output_file) else 0
+        
+        # Інформація про доступні голоси
+        available_voices = [
+            "v2/en_speaker_0", "v2/en_speaker_1", "v2/en_speaker_2", 
+            "v2/en_speaker_6", "v2/en_speaker_7", "v2/en_speaker_9"
+        ]
+        
+        return {
+            "success": True,
+            "duration": duration,
+            "file_size": file_size,
+            "error": None,
+            "features": {
+                "quality": "Дуже висока (AI клонування)",
+                "internet_required": False,  # Після завантаження моделей
+                "languages": "Англійська (+ емоції, інтонації)",
+                "voice_options": f"10 унікальних голосів: {', '.join(available_voices[:3])}...",
+                "speed_control": "Так (через текстові команди)"
+            }
+        }
+        
+    except ImportError as e:
+        return {
+            "success": False,
+            "duration": 0,
+            "file_size": 0,
+            "error": f"Не встановлено: pip install bark scipy ({e})",
+            "features": {}
+        }
+    except Exception as e:
+        error_msg = str(e)
+        if "weights_only" in error_msg or "WeightsUnpickler" in error_msg:
+            return {
+                "success": False,
+                "duration": 0,
+                "file_size": 0,
+                "error": "PyTorch 2.6+ проблема завантаження моделей. Спробуйте: pip install torch==2.4.0",
+                "features": {}
+            }
+        else:
+            return {
+                "success": False,
+                "duration": 0,
+                "file_size": 0,
+                "error": str(e),
+                "features": {}
+            }
+
 def test_espeak(text, output_file, language="en"):
     """Тестує espeak (системний TTS)"""
     try:
@@ -379,6 +548,9 @@ def main():
     print("🚀 ТЕСТ ПОРІВНЯННЯ TTS СИСТЕМ")
     print("="*50)
     
+    # Налаштовуємо PyTorch для сумісності з новими версіями
+    setup_pytorch_safe_globals()
+    
     # Тестовий текст
     test_text = "Hey, whatcha up to?"
     print(f"📝 Тестовий текст: '{test_text}'")
@@ -392,6 +564,7 @@ def main():
         "gTTS": lambda: test_gtts(test_text, f"{output_dir}/gtts_test.wav"),
         "pyttsx3": lambda: test_pyttsx3(test_text, f"{output_dir}/pyttsx3_test.wav"),
         "Coqui TTS": lambda: test_coqui_tts(test_text, f"{output_dir}/coqui_test.wav"),
+        "Bark TTS": lambda: test_bark_tts(test_text, f"{output_dir}/bark_test.wav"),
         "espeak": lambda: test_espeak(test_text, f"{output_dir}/espeak_test.wav")
     }
     
@@ -435,6 +608,8 @@ def main():
         print("🎯 Доступні системи:", ", ".join(successful_systems))
         
         # Рекомендація по якості
+        if "Bark TTS" in successful_systems:
+            print("🎖️ Найкращі емоції: Bark TTS (AI клонування голосу)")
         if "Coqui TTS" in successful_systems:
             print("🏆 Найкраща якість: Coqui TTS (AI neural, офлайн)")
         if "gTTS" in successful_systems:
@@ -446,10 +621,12 @@ def main():
     else:
         print("❌ Жодна TTS система не працює!")
         print("💡 Встановіть одну з бібліотек:")
+        print("   pip install bark scipy              # Bark TTS (AI клонування голосу)")
         print("   pip install TTS                    # Coqui TTS (найкраща якість)")
         print("   pip install gtts pydub             # Google TTS")
         print("   pip install pyttsx3                # Offline TTS")
         print("   sudo apt-get install espeak        # espeak (Linux)")
+        print("\n⚠️ УВАГА: Для PyTorch 2.6+ див. PYTORCH_COMPATIBILITY.md")
     
     # Можливість прослухати результати
     if successful_systems:
@@ -457,7 +634,14 @@ def main():
         print("-" * 40)
         
         for tts_name in successful_systems:
-            file_path = f"{output_dir}/{tts_name.lower()}_test.wav"
+            # Створюємо правильний шлях до файлу
+            if tts_name == "Bark TTS":
+                file_path = f"{output_dir}/bark_test.wav"
+            elif tts_name == "Coqui TTS":
+                file_path = f"{output_dir}/coqui_test.wav"
+            else:
+                file_path = f"{output_dir}/{tts_name.lower()}_test.wav"
+                
             if os.path.exists(file_path):
                 try:
                     input(f"📱 Натисніть Enter для прослуховування {tts_name}...")

@@ -5,7 +5,7 @@ import os
 import sys
 sys.path.append('.')
 
-from test_tts_comparison import test_gtts, test_pyttsx3, test_coqui_tts, test_espeak, print_comparison_table, play_audio_file
+from test_tts_comparison import test_gtts, test_pyttsx3, test_coqui_tts, test_bark_tts, test_espeak, print_comparison_table, play_audio_file
 
 def quick_tts_test():
     """Швидкий тест TTS з поточним текстом"""
@@ -62,6 +62,16 @@ def quick_tts_test():
         print("❌ Coqui TTS недоступний")
         results["Coqui TTS"] = {"success": False, "error": "Не встановлено", "duration": 0, "file_size": 0, "features": {}}
     
+    # Тест Bark TTS
+    try:
+        from bark import generate_audio
+        print("✅ Bark TTS доступний")
+        result = test_bark_tts(test_text, f"{output_dir}/bark_quick.wav")
+        results["Bark TTS"] = result
+    except ImportError:
+        print("❌ Bark TTS недоступний")
+        results["Bark TTS"] = {"success": False, "error": "Не встановлено", "duration": 0, "file_size": 0, "features": {}}
+    
     # Тест espeak
     try:
         import subprocess
@@ -86,12 +96,14 @@ def quick_tts_test():
         print(f"✅ Працюючі системи: {', '.join(successful)}")
         
         # Порядок пріоритету
-        if "Coqui TTS" in successful:
+        if "Bark TTS" in successful:
+            print("🎖️ Рекомендовано: Bark TTS (найкращі емоції та інтонації)")
+        elif "Coqui TTS" in successful:
             print("🥇 Рекомендовано: Coqui TTS (найкраща AI якість)")
         elif "gTTS" in successful:
             print("🥈 Рекомендовано: gTTS (висока якість)")
         elif "pyttsx3" in successful:
-            print("� Рекомендовано: pyttsx3 (офлайн)")
+            print("🔄 Рекомендовано: pyttsx3 (офлайн)")
         elif "espeak" in successful:
             print("🔧 Рекомендовано: espeak (базовий)")
         
@@ -100,7 +112,9 @@ def quick_tts_test():
         
         # Автопрослуховування найкращого
         best_file = None
-        if "Coqui TTS" in successful:
+        if "Bark TTS" in successful:
+            best_file = f"{output_dir}/bark_quick.wav"
+        elif "Coqui TTS" in successful:
             best_file = f"{output_dir}/coqui_quick.wav"
         elif "gTTS" in successful:
             best_file = f"{output_dir}/gtts_quick.wav"
